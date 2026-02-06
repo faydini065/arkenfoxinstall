@@ -13,10 +13,6 @@ exit_on_error() {
     exit 1
 }
 
-check_dependencies() {
-    command -v curl >/dev/null 2>&1 || exit_on_error "curl is not installed. Please install it using 'sudo apt install curl'."
-}
-
 get_profile() {
     clear
     echo -e "${BLUE}${BOLD}==================================================${NC}"
