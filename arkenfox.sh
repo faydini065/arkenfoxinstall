@@ -70,7 +70,7 @@ options=(
     "Disable Clear on Shutdown (Keep History)"
     "Enable WebGL Support"
     "Disable Fingerprint Resistance (RFP Off)"
-    "EXECUTE DEPLOYMENT"
+    "SAVE CHANGES"
     "ABORT"
 )
 selected=(0 0 1 0 0 0)
