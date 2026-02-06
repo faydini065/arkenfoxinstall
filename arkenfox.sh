@@ -8,13 +8,11 @@ CYAN='\033[0;36m'
 NC='\033[0m'
 BOLD='\033[1m'
 
-# GLOBAL ERROR HANDLER
 exit_on_error() {
     echo -e "\n${RED}[CRITICAL ERROR] $1${NC}"
     exit 1
 }
 
-# DEPENDENCY CHECK (Curl is required)
 check_dependencies() {
     command -v curl >/dev/null 2>&1 || exit_on_error "curl is not installed. Please install it using 'sudo apt install curl'."
 }
@@ -131,7 +129,7 @@ apply_changes() {
     clear
     echo -e "${BLUE}${BOLD}--- DEPLOYMENT LOGS & STATUS ---${NC}"
 
-    # 1. Backup Phase
+    
     echo -ne "${CYAN}[1/5] Phase: Backup | Status: Processing...${NC}"
     if [ -f "$TARGET_PROFILE/user.js" ]; then
         cp "$TARGET_PROFILE/user.js" "$TARGET_PROFILE/user.js.bak" || exit_on_error "Backup failed."
@@ -140,12 +138,11 @@ apply_changes() {
         echo -e "\r${CYAN}[1/5] Phase: Backup | Status: ${YELLOW}SKIPPED (No existing user.js)${NC}"
     fi
 
-    # 2. Download Phase
     echo -ne "${CYAN}[2/5] Phase: Fetch  | Status: Downloading Master...${NC}"
     curl -sL -o "$TARGET_PROFILE/user.js" https://raw.githubusercontent.com/arkenfox/user.js/master/user.js || exit_on_error "Download failed."
     echo -e "\r${CYAN}[2/5] Phase: Fetch  | Status: ${GREEN}SUCCESS (v128+ Baseline)${NC}"
 
-    # 3. Injection Phase
+   
     echo -ne "${CYAN}[3/5] Phase: Inject | Status: Appending Overrides...${NC}"
     {
         echo -e "\n\n/** [GLOBAL-USER-OVERRIDES-START] **/"
@@ -163,7 +160,7 @@ apply_changes() {
     } >> "$TARGET_PROFILE/user.js"
     echo -e "\r${CYAN}[3/5] Phase: Inject | Status: ${GREEN}SUCCESS (Custom Block Applied)${NC}"
 
-    # 4. Verification Phase
+    
     echo -ne "${CYAN}[4/5] Phase: Verify | Status: Checking Integrity...${NC}"
     if grep -q "GLOBAL-USER-OVERRIDES-START" "$TARGET_PROFILE/user.js"; then
         echo -e "\r${CYAN}[4/5] Phase: Verify | Status: ${GREEN}INTEGRITY CONFIRMED${NC}"
@@ -171,7 +168,7 @@ apply_changes() {
         exit_on_error "Injection verification failed. File system might be read-only."
     fi
 
-    # 5. Optimization Phase
+   
     echo -ne "${CYAN}[5/5] Phase: Clean  | Status: Flushing prefs.js...${NC}"
     rm -f "$TARGET_PROFILE/prefs.js"
     echo -e "\r${CYAN}[5/5] Phase: Clean  | Status: ${GREEN}SUCCESS (Cache Purged)${NC}"
