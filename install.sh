@@ -8,6 +8,7 @@ CYAN='\033[0;36m'
 NC='\033[0m'
 BOLD='\033[1m'
 
+# --- 1. YARDIMCI FONKSİYONLAR ---
 exit_on_error() {
     echo -e "\n${RED}[ERROR] $1${NC}"
     exit 1
@@ -22,6 +23,7 @@ check_dependencies() {
 
 check_firefox_lock() {
     if [ -f "$TARGET_PROFILE/parent.lock" ] || [ -f "$TARGET_PROFILE/.parentlock" ]; then
+        if [[ "$1" == "--silent" ]]; then exit 0; fi # Sessiz modda hata verme, çık.
         echo -e "${YELLOW}[!] Alert: Firefox process is currently active.${NC}"
         echo -ne "${BOLD}Force execution? (y/N): ${NC}"
         read -r run_choice
@@ -30,11 +32,7 @@ check_firefox_lock() {
 }
 
 get_profile() {
-    clear
-    echo -e "${BLUE}${BOLD}==================================================${NC}"
-    echo -e "${BLUE}${BOLD}                   Arkenfox Installer             ${NC}"
-    echo -e "${BLUE}${BOLD}==================================================${NC}"
-
+    local mode=$1
     SEARCH_PATHS=(
         "$HOME/.var/app/org.mozilla.firefox/config/mozilla/firefox"
         "$HOME/.mozilla/firefox"
@@ -51,28 +49,36 @@ get_profile() {
     done
 
     if [ ${#FOUND_PROFILES[@]} -gt 0 ]; then
-        echo -e "${GREEN}[+] Discovery: Found ${#FOUND_PROFILES[@]} compatible profiles:${NC}"
-        for i in "${!FOUND_PROFILES[@]}"; do
-            echo -e "  $((i+1))) ${FOUND_PROFILES[$i]}"
-        done
-        echo -e "  m) Manual Entry"
-        echo -ne "\n${BOLD}Select Target Profile: ${NC}"
-        read -r choice
-
-        if [[ "$choice" == "m" ]]; then
-            read -r -p "Enter full absolute path: " TARGET_PROFILE
-        elif [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -le "${#FOUND_PROFILES[@]}" ] && [ "$choice" -gt 0 ]; then
-            TARGET_PROFILE="${FOUND_PROFILES[$((choice-1))]}"
+        if [[ "$mode" == "--silent" ]]; then
+            TARGET_PROFILE="${FOUND_PROFILES[0]}"
         else
-            exit_on_error "Invalid input selection."
+            clear
+            echo -e "${BLUE}${BOLD}==================================================${NC}"
+            echo -e "${BLUE}${BOLD}                   Arkenfox Installer             ${NC}"
+            echo -e "${BLUE}${BOLD}==================================================${NC}"
+            echo -e "${GREEN}[+] Discovery: Found ${#FOUND_PROFILES[@]} profiles:${NC}"
+            for i in "${!FOUND_PROFILES[@]}"; do
+                echo -e "  $((i+1))) ${FOUND_PROFILES[$i]}"
+            done
+            echo -e "  m) Manual Entry"
+            echo -ne "\n${BOLD}Select Target Profile (Default 1): ${NC}"
+            read -r choice
+            if [[ "$choice" == "m" ]]; then
+                read -r -p "Enter full path: " TARGET_PROFILE
+            elif [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -le "${#FOUND_PROFILES[@]}" ]; then
+                TARGET_PROFILE="${FOUND_PROFILES[$((choice-1))]}"
+            else
+                TARGET_PROFILE="${FOUND_PROFILES[0]}"
+            fi
         fi
     else
+        [[ "$mode" == "--silent" ]] && exit 0
         read -r -p "Profile not detected. Provide path manually: " TARGET_PROFILE
     fi
-
-    [[ ! -f "$TARGET_PROFILE/prefs.js" ]] && exit_on_error "Target directory is not a valid Firefox profile."
+    [[ ! -f "$TARGET_PROFILE/prefs.js" ]] && exit_on_error "Invalid Firefox profile."
 }
 
+# --- 2. AYARLAR VE MENÜ ---
 options=(
     "Enable Search Suggestions"
     "Enable Password Manager"
@@ -86,7 +92,7 @@ options=(
 
 selected=()
 for ((i=0; i<${#options[@]}-2; i++)); do selected+=(0); done
-selected[2]=1
+selected[2]=1 # Homepage varsayılan seçili
 cursor=0
 
 draw_menu() {
@@ -98,7 +104,6 @@ draw_menu() {
     for i in "${!options[@]}"; do
         prefix="    "
         [[ "$i" -eq "$cursor" ]] && prefix="${RED}  > ${NC}${BOLD}${CYAN}"
-
         if [ "$i" -lt $((${#options[@]}-2)) ]; then
             symbol="[ ]"
             [[ "${selected[$i]}" -eq 1 ]] && symbol="${GREEN}[X]${NC}"
@@ -126,121 +131,99 @@ run_menu() {
     done
 }
 
+# --- 3. ANA İŞLEMLER ---
+apply_changes() {
+    local mode=$1
+    [[ "$mode" != "--silent" ]] && clear && echo -e "${BLUE}${BOLD}--- EXECUTION LOGS ---${NC}"
+    check_firefox_lock "$mode"
+
+    TMP_USERJS=$(mktemp) || exit_on_error "Temp file failed."
+    [ -f "$TARGET_PROFILE/user.js" ] && cp "$TARGET_PROFILE/user.js" "$TARGET_PROFILE/user.js.bak"
+
+    curl -sL -o "$TMP_USERJS" https://raw.githubusercontent.com/arkenfox/user.js/master/user.js || exit_on_error "Download failed."
+
+    {
+        echo -e "\n\n/** [UserOverrides] **/"
+        if [[ "$mode" == "--silent" ]]; then
+            # Sessiz mod varsayılanları
+            echo 'user_pref("browser.search.suggest.enabled", true);'
+            echo 'user_pref("browser.startup.homepage", "about:home");'
+            echo 'user_pref("browser.newtabpage.enabled", true);'
+            echo 'user_pref("browser.startup.page", 1);'
+        else
+            [[ "${selected[0]}" -eq 1 ]] && echo 'user_pref("browser.search.suggest.enabled", true);'
+            [[ "${selected[1]}" -eq 1 ]] && echo 'user_pref("signon.rememberSignons", true);'
+            if [ "${selected[2]}" -eq 1 ]; then
+                echo 'user_pref("browser.startup.homepage", "about:home");'
+                echo 'user_pref("browser.newtabpage.enabled", true);'
+                echo 'user_pref("browser.startup.page", 1);'
+            fi
+            [[ "${selected[3]}" -eq 1 ]] && echo 'user_pref("privacy.sanitize.sanitizeOnShutdown", false);'
+            [[ "${selected[4]}" -eq 1 ]] && echo 'user_pref("webgl.disabled", false);'
+            [[ "${selected[5]}" -eq 1 ]] && echo 'user_pref("privacy.resistFingerprinting", false);'
+        fi
+        echo -e "/** [UserOverrides] **/\n"
+    } >> "$TMP_USERJS"
+
+    mv "$TMP_USERJS" "$TARGET_PROFILE/user.js"
+    cp "$TARGET_PROFILE/prefs.js" "$TARGET_PROFILE/prefs.js.bak"
+    
+    if [[ "$mode" != "--silent" ]]; then
+        echo -e "${GREEN}[✔] Success. Please restart Firefox.${NC}"
+        read -n 1 -s -p "Press any key to return..."
+    fi
+}
+
 set_updater() {
     clear
-    echo -e "${BLUE}${BOLD}--- SET AUTO-UPDATER ---${NC}"
-    local script_path=$(realpath "$0")
-    
-    # Bilgisayar her açıldığında (@reboot) çalışacak şekilde crontab'a ekler
-    (crontab -l 2>/dev/null | grep -v "$script_path"; echo "@reboot /bin/bash $script_path --auto-deploy") | crontab -
-    
-    echo -e "${GREEN}[✔] Success: Updater scheduled at every system startup.${NC}"
-    echo -e "${YELLOW}[!] The script will now run once in the background whenever you boot up.${NC}"
+    local s_path=$(readlink -f "$0")
+    (crontab -l 2>/dev/null | grep -v "$s_path"; echo "@reboot /bin/bash \"$s_path\" --auto-deploy") | crontab -
+    echo -e "${GREEN}[✔] Success: Auto-updater set for system startup.${NC}"
     read -n 1 -s -p "Press any key to return..."
 }
 
 uninstall_arkenfox() {
     clear
-    echo -e "${RED}${BOLD}--- UNINSTALL ARKENFOX ---${NC}"
-    echo -e "${YELLOW}[!] Backups will be restored if available.${NC}"
-    echo -ne "${BOLD}Continue? (y/N): ${NC}"
+    echo -ne "${RED}Uninstall Arkenfox and restore backups? (y/N): ${NC}"
     read -r un_choice
     if [[ "$un_choice" =~ ^[Yy]$ ]]; then
         [ -f "$TARGET_PROFILE/user.js.bak" ] && mv "$TARGET_PROFILE/user.js.bak" "$TARGET_PROFILE/user.js" || rm -f "$TARGET_PROFILE/user.js"
         [ -f "$TARGET_PROFILE/prefs.js.bak" ] && mv "$TARGET_PROFILE/prefs.js.bak" "$TARGET_PROFILE/prefs.js"
-        # Crontab kaydını da temizle
-        local script_path=$(realpath "$0")
-        crontab -l 2>/dev/null | grep -v "$script_path" | crontab -
-        echo -e "${GREEN}[✔] Arkenfox removed and auto-updater unscheduled.${NC}"
+        local s_path=$(readlink -f "$0")
+        crontab -l 2>/dev/null | grep -v "$s_path" | crontab -
+        echo -e "${GREEN}[✔] Uninstalled.${NC}"
     fi
     read -n 1 -s -p "Press any key to return..."
 }
 
-apply_changes() {
-    [[ "$1" != "--silent" ]] && check_firefox_lock
-    clear
-    echo -e "${BLUE}${BOLD}--- EXECUTION LOGS ---${NC}"
-
-    TMP_USERJS=$(mktemp) || exit_on_error "Environment error."
-
-    if [ -f "$TARGET_PROFILE/user.js" ]; then
-        cp "$TARGET_PROFILE/user.js" "$TARGET_PROFILE/user.js.bak"
-        echo -e "${CYAN}[1/4] Status:${NC} Existing user.js archived."
-    fi
-
-    echo -ne "${CYAN}[2/4] Fetching:${NC} Downloading Arkenfox baseline..."
-    curl -sL -o "$TMP_USERJS" https://raw.githubusercontent.com/arkenfox/user.js/master/user.js || exit_on_error "Network error."
-    echo -e " ${GREEN}SUCCESS${NC}"
-
-    echo -ne "${CYAN}[3/4] Injecting:${NC} Applying custom user overrides..."
-    {
-        echo -e "\n\n/** [UserOverrides] **/"
-        [[ "${selected[0]}" -eq 1 ]] || [[ "$1" == "--silent" ]] && echo 'user_pref("browser.search.suggest.enabled", true);'
-        [[ "${selected[1]}" -eq 1 ]] && echo 'user_pref("signon.rememberSignons", true);'
-        if [ "${selected[2]}" -eq 1 ] || [ "$1" == "--silent" ]; then
-            echo 'user_pref("browser.startup.homepage", "about:home");'
-            echo 'user_pref("browser.newtabpage.enabled", true);'
-            echo 'user_pref("browser.startup.page", 1);'
-        fi
-        [[ "${selected[3]}" -eq 1 ]] && echo 'user_pref("privacy.sanitize.sanitizeOnShutdown", false);'
-        [[ "${selected[4]}" -eq 1 ]] && echo 'user_pref("webgl.disabled", false);'
-        [[ "${selected[5]}" -eq 1 ]] && echo 'user_pref("privacy.resistFingerprinting", false);'
-        echo -e "/** [UserOverrides] **/\n"
-    } >> "$TMP_USERJS"
-
-    mv "$TMP_USERJS" "$TARGET_PROFILE/user.js" || exit_on_error "Failed to write user.js"
-    echo -e " ${GREEN}SUCCESS${NC}"
-
-    echo -ne "${CYAN}[4/4] Optimizing:${NC} Synchronizing profile preferences..."
-    [ -f "$TARGET_PROFILE/prefs.js" ] && cp "$TARGET_PROFILE/prefs.js" "$TARGET_PROFILE/prefs.js.bak"
-    echo -e " ${GREEN}SUCCESS${NC}"
-
-    echo -e "\n${GREEN}${BOLD}[✔] Success. Please restart Firefox.${NC}"
-    [[ "$1" != "--silent" ]] && read -n 1 -s -p "Press any key to return..."
-}
-
 main_panel() {
-    local main_options=("INSTALL / UPDATE" "UNINSTALL" "SET AUTO-UPDATER" "EXIT")
+    local m_options=("INSTALL / UPDATE" "UNINSTALL" "SET AUTO-UPDATER" "EXIT")
     local cur=0
     while true; do
         clear
         echo -e "${BLUE}${BOLD}==================================================${NC}"
         echo -e "${BLUE}${BOLD}            ARKENFOX MANAGEMENT PANEL             ${NC}"
         echo -e "${BLUE}${BOLD}==================================================${NC}"
-        echo -e "${CYAN}Target Profile:${NC} $TARGET_PROFILE\n"
-
-        for i in "${!main_options[@]}"; do
-            if [[ "$i" -eq "$cur" ]]; then
-                echo -e "${RED}  > ${NC}${BOLD}${CYAN}${main_options[$i]}${NC}"
-            else
-                echo -e "    ${main_options[$i]}"
-            fi
+        for i in "${!m_options[@]}"; do
+            [[ "$i" -eq "$cur" ]] && echo -e "${RED}  > ${NC}${BOLD}${CYAN}${m_options[$i]}${NC}" || echo -e "    ${m_options[$i]}"
         done
-
         IFS= read -rsn1 key
         [[ $key == $'\x1b' ]] && { read -rsn2 key; }
         case "$key" in
-            "[A") ((cur--)); [ "$cur" -lt 0 ] && cur=$((${#main_options[@]} - 1)) ;;
-            "[B") ((cur++)); [ "$cur" -ge "${#main_options[@]}" ] && cur=0 ;;
-            "") 
-                case $cur in
-                    0) run_menu ;;
-                    1) uninstall_arkenfox ;;
-                    2) set_updater ;;
-                    3) exit 0 ;;
-                esac
-                ;;
+            "[A") ((cur--)); [ "$cur" -lt 0 ] && cur=3 ;;
+            "[B") ((cur++)); [ "$cur" -gt 3 ] && cur=0 ;;
+            "") case $cur in 0) run_menu ;; 1) uninstall_arkenfox ;; 2) set_updater ;; 3) exit 0 ;; esac ;;
         esac
     done
 }
 
-# SESSİZ ÇALIŞMA MODU (CRON İÇİN)
-if [[ "$1" == "--auto-deploy" ]]; then
-    get_profile
-    apply_changes "--silent"
-    exit 0
-fi
-
+# --- 4. ÇALIŞTIRMA MANTIĞI ---
 check_dependencies
-get_profile
-main_panel
+
+if [[ "$1" == "--auto-deploy" ]]; then
+    get_profile "--silent"
+    apply_changes "--silent"
+else
+    get_profile
+    main_panel
+fi
