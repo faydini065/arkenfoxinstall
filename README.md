@@ -3,4 +3,6 @@ Arkenfox Installation Tool is autoinstallation tool for https://github.com/arken
 "Only Linux"
 ## İnstallation
 Open Terminal and Copy Paste
-```bash -c "$(curl -sS https://raw.githubusercontent.com/faydini065/arkenfoxinstall/refs/heads/main/arkenfox.sh)"```
+```
+bash -c "$(curl -sS https://raw.githubusercontent.com/faydini065/arkenfoxinstall/refs/heads/main/arkenfox.sh)"
+```
