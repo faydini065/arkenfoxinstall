@@ -32,7 +32,7 @@ check_firefox_lock() {
 get_profile() {
     clear
     echo -e "${BLUE}${BOLD}==================================================${NC}"
-    echo -e "${BLUE}${BOLD}        FIREFOX HARDENING UTILITY - ARKENFOX      ${NC}"
+    echo -e "${BLUE}${BOLD}                   Arkenfox İnstaller             ${NC}"
     echo -e "${BLUE}${BOLD}==================================================${NC}"
 
     SEARCH_PATHS=(
@@ -81,8 +81,8 @@ options=(
     "Keep Browsing History"
     "Enable WebGL Support"
     "Disable Fingerprint Resistance"
-    "CONFIRM DEPLOYMENT"
-    "ABORT OPERATION"
+    "[✔]CONFIRM"
+    "[x]ABORT"
 )
 
 selected=()
@@ -165,7 +165,7 @@ apply_changes() {
     [ -f "$TARGET_PROFILE/prefs.js" ] && cp "$TARGET_PROFILE/prefs.js" "$TARGET_PROFILE/prefs.js.bak"
     echo -e " ${GREEN}SUCCESS${NC}"
 
-    echo -e "\n${GREEN}${BOLD}[✔] Hardening complete. Please restart Firefox to apply changes.${NC}"
+    echo -e "\n${GREEN}${BOLD}[✔] Success. Please restart Firefox to apply changes.${NC}"
 }
 
 check_dependencies
