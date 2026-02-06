@@ -13,12 +13,27 @@ exit_on_error() {
     exit 1
 }
 
+check_dependencies() {
+    local deps=("curl" "find" "grep" "mktemp" "cp" "rm")
+    for dep in "${deps[@]}"; do
+        command -v "$dep" >/dev/null 2>&1 || exit_on_error "Dependency '$dep' is missing. Please install it."
+    done
+}
+
+check_firefox_lock() {
+    if [ -f "$TARGET_PROFILE/parent.lock" ] || [ -f "$TARGET_PROFILE/.parentlock" ]; then
+        echo -e "${YELLOW}[!] Warning: Firefox appears to be running.${NC}"
+        echo -ne "${BOLD}Continue anyway? (y/N): ${NC}"
+        read -r run_choice
+        [[ ! "$run_choice" =~ ^[Yy]$ ]] && exit 0
+    fi
+}
+
 get_profile() {
     clear
     echo -e "${BLUE}${BOLD}==================================================${NC}"
     echo -e "${BLUE}${BOLD}           ARKENFOX GLOBAL CONFIGURATOR           ${NC}"
     echo -e "${BLUE}${BOLD}==================================================${NC}"
-    echo -e "${CYAN}[*] Initializing system scan...${NC}\n"
 
     SEARCH_PATHS=(
         "$HOME/.var/app/org.mozilla.firefox/config/mozilla/firefox"
@@ -46,53 +61,52 @@ get_profile() {
 
         if [[ "$choice" == "m" ]]; then
             read -r -p "Enter full absolute path: " TARGET_PROFILE
-        else
+        elif [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -le "${#FOUND_PROFILES[@]}" ] && [ "$choice" -gt 0 ]; then
             TARGET_PROFILE="${FOUND_PROFILES[$((choice-1))]}"
+        else
+            exit_on_error "Invalid selection."
         fi
     else
-        echo -e "${YELLOW}[!] Automatic detection failed.${NC}"
         read -r -p "Provide profile path manually: " TARGET_PROFILE
     fi
 
-    [[ -z "$TARGET_PROFILE" ]] && exit_on_error "Profile path cannot be empty."
-    [[ ! -d "$TARGET_PROFILE" ]] && exit_on_error "Directory does not exist: $TARGET_PROFILE"
-    [[ ! -f "$TARGET_PROFILE/prefs.js" ]] && exit_on_error "Not a valid Firefox profile (prefs.js missing)."
+    [[ ! -f "$TARGET_PROFILE/prefs.js" ]] && exit_on_error "Invalid Firefox profile."
+    check_firefox_lock
 }
+
 
 options=(
     "Enable Search Suggestions"
     "Enable Password Manager"
-    "Restore Default Homepage (about:home)"
-    "Disable Clear on Shutdown (Keep History)"
+    "Restore Default Homepage"
+    "Keep Browsing History"
     "Enable WebGL Support"
-    "Disable Fingerprint Resistance (RFP Off)"
+    "Disable Fingerprint Resistance"
     "SAVE CHANGES"
     "ABORT"
 )
-selected=(0 0 1 0 0 0)
+
+selected=()
+for ((i=0; i<${#options[@]}-2; i++)); do selected+=(0); done
+selected[2]=1
 cursor=0
 
 draw_menu() {
     clear
-    echo -e "${BLUE}${BOLD}--- SYSTEM CONFIGURATION INTERFACE ---${NC}"
+    echo -e "${BLUE}${BOLD}--- Configuration ---${NC}"
     echo -e "${CYAN}Target Profile:${NC} $TARGET_PROFILE"
     echo -e "${YELLOW}Navigation: [↑/↓] | Toggle: [SPACE] | Confirm: [ENTER]${NC}\n"
 
     for i in "${!options[@]}"; do
-        if [ "$i" -eq "$cursor" ]; then
-            prefix="${RED}  > ${NC}${BOLD}${CYAN}"
-            suffix="${NC}"
-        else
-            prefix="    "
-            suffix="${NC}"
-        fi
+        prefix="    "
+        [[ "$i" -eq "$cursor" ]] && prefix="${RED}  > ${NC}${BOLD}${CYAN}"
 
-        if [ "$i" -lt 6 ]; then
-            symbol="${GREEN}[X]${NC}"
-            [ "${selected[$i]}" -eq 0 ] && symbol="[ ]"
-            echo -e "${prefix}${symbol} ${options[$i]}${suffix}"
+        if [ "$i" -lt $((${#options[@]}-2)) ]; then
+            symbol="[ ]"
+            [[ "${selected[$i]}" -eq 1 ]] && symbol="${GREEN}[X]${NC}"
+            echo -e "${prefix}${symbol} ${options[$i]}${NC}"
         else
-            echo -e "\n${prefix}  ${options[$i]}${suffix}"
+            echo -e "\n${prefix}  ${options[$i]}${NC}"
         fi
     done
 }
@@ -101,21 +115,14 @@ run_menu() {
     while true; do
         draw_menu
         IFS= read -rsn1 key
-        if [[ $key == $'\x1b' ]]; then
-            read -rsn2 key
-        fi
-
+        [[ $key == $'\x1b' ]] && { read -rsn2 key; }
         case "$key" in
             "[A") ((cursor--)); [ "$cursor" -lt 0 ] && cursor=$((${#options[@]} - 1)) ;;
             "[B") ((cursor++)); [ "$cursor" -ge "${#options[@]}" ] && cursor=0 ;;
-            " ")
-                if [ "$cursor" -lt 6 ]; then
-                    [ "${selected[$cursor]}" -eq 1 ] && selected[$cursor]=0 || selected[$cursor]=1
-                fi
-                ;;
+            " ") [ "$cursor" -lt $((${#options[@]}-2)) ] && { [[ "${selected[$cursor]}" -eq 1 ]] && selected[$cursor]=0 || selected[$cursor]=1; } ;;
             "")
-                if [ "$cursor" -eq 6 ]; then break; fi
-                if [ "$cursor" -eq 7 ]; then exit 0; fi
+                [[ "$cursor" -eq $((${#options[@]}-2)) ]] && break
+                [[ "$cursor" -eq $((${#options[@]}-1)) ]] && exit 0
                 ;;
         esac
     done
@@ -123,25 +130,26 @@ run_menu() {
 
 apply_changes() {
     clear
-    echo -e "${BLUE}${BOLD}--- DEPLOYMENT LOGS & STATUS ---${NC}"
+    echo -e "${BLUE}${BOLD}--- DEPLOYMENT LOGS ---${NC}"
 
-    
-    echo -ne "${CYAN}[1/5] Phase: Backup | Status: Processing...${NC}"
+
+    TMP_USERJS=$(mktemp) || exit_on_error "Could not create temporary file."
+
+
     if [ -f "$TARGET_PROFILE/user.js" ]; then
         cp "$TARGET_PROFILE/user.js" "$TARGET_PROFILE/user.js.bak" || exit_on_error "Backup failed."
-        echo -e "\r${CYAN}[1/5] Phase: Backup | Status: ${GREEN}SUCCESS (user.js.bak)${NC}"
-    else
-        echo -e "\r${CYAN}[1/5] Phase: Backup | Status: ${YELLOW}SKIPPED (No existing user.js)${NC}"
+        echo -e "${GREEN}[1/4] Backup created: user.js.bak${NC}"
     fi
 
-    echo -ne "${CYAN}[2/5] Phase: Fetch  | Status: Downloading Master...${NC}"
-    curl -sL -o "$TARGET_PROFILE/user.js" https://raw.githubusercontent.com/arkenfox/user.js/master/user.js || exit_on_error "Download failed."
-    echo -e "\r${CYAN}[2/5] Phase: Fetch  | Status: ${GREEN}SUCCESS (v128+ Baseline)${NC}"
 
-   
-    echo -ne "${CYAN}[3/5] Phase: Inject | Status: Appending Overrides...${NC}"
+    echo -ne "${CYAN}[2/4] Fetching Arkenfox Master...${NC}"
+    curl -sL -o "$TMP_USERJS" https://raw.githubusercontent.com/arkenfox/user.js/master/user.js || exit_on_error "Download failed."
+    echo -e " ${GREEN}DONE${NC}"
+
+
+    echo -ne "${CYAN}[3/4] Injecting Overrides...${NC}"
     {
-        echo -e "\n\n/** [GLOBAL-USER-OVERRIDES-START] **/"
+        echo -e "\n\n/** [UserOverrides] **/"
         [[ "${selected[0]}" -eq 1 ]] && echo 'user_pref("browser.search.suggest.enabled", true);'
         [[ "${selected[1]}" -eq 1 ]] && echo 'user_pref("signon.rememberSignons", true);'
         if [ "${selected[2]}" -eq 1 ]; then
@@ -152,30 +160,21 @@ apply_changes() {
         [[ "${selected[3]}" -eq 1 ]] && echo 'user_pref("privacy.sanitize.sanitizeOnShutdown", false);'
         [[ "${selected[4]}" -eq 1 ]] && echo 'user_pref("webgl.disabled", false);'
         [[ "${selected[5]}" -eq 1 ]] && echo 'user_pref("privacy.resistFingerprinting", false);'
-        echo -e "/** [GLOBAL-USER-OVERRIDES-END] **/\n"
-    } >> "$TARGET_PROFILE/user.js"
-    echo -e "\r${CYAN}[3/5] Phase: Inject | Status: ${GREEN}SUCCESS (Custom Block Applied)${NC}"
+        echo -e "/** [UserOverrides] **/\n"
+    } >> "$TMP_USERJS"
 
-    
-    echo -ne "${CYAN}[4/5] Phase: Verify | Status: Checking Integrity...${NC}"
-    if grep -q "GLOBAL-USER-OVERRIDES-START" "$TARGET_PROFILE/user.js"; then
-        echo -e "\r${CYAN}[4/5] Phase: Verify | Status: ${GREEN}INTEGRITY CONFIRMED${NC}"
-    else
-        exit_on_error "Installation verification failed. File system might be read-only."
-    fi
 
-   
-    echo -ne "${CYAN}[5/5] Phase: Clean  | Status: Flushing prefs.js...${NC}"
-    rm -f "$TARGET_PROFILE/prefs.js"
-    echo -e "\r${CYAN}[5/5] Phase: Clean  | Status: ${GREEN}SUCCESS (Cache Purged)${NC}"
+    mv "$TMP_USERJS" "$TARGET_PROFILE/user.js" || exit_on_error "Atomic write failed."
+    echo -e " ${GREEN}DONE${NC}"
 
-    echo -e "\n${GREEN}${BOLD}==================================================${NC}"
-    echo -e "${GREEN}${BOLD}      HARDENING & CUSTOMIZATION COMPLETED         ${NC}"
-    echo -e "${GREEN}${BOLD}==================================================${NC}"
-    echo -e "${YELLOW}Final Instruction:${NC} Please close all Firefox instances and restart."
+
+    echo -ne "${CYAN}[4/4] Purging Cache (prefs.js)...${NC}"
+    [ -f "$TARGET_PROFILE/prefs.js" ] && mv "$TARGET_PROFILE/prefs.js" "$TARGET_PROFILE/prefs.js.bak"
+    echo -e " ${GREEN}DONE${NC}"
+
+    echo -e "\n${GREEN}${BOLD}İnstallation Success. Please Restart Firefox${NC}"
 }
 
-# --- START ---
 check_dependencies
 get_profile
 run_menu
