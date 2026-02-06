@@ -32,7 +32,7 @@ check_firefox_lock() {
 get_profile() {
     clear
     echo -e "${BLUE}${BOLD}==================================================${NC}"
-    echo -e "${BLUE}${BOLD}                   Arkenfox İnstaller             ${NC}"
+    echo -e "${BLUE}${BOLD}                   Arkenfox Installer             ${NC}"
     echo -e "${BLUE}${BOLD}==================================================${NC}"
 
     SEARCH_PATHS=(
@@ -71,7 +71,6 @@ get_profile() {
     fi
 
     [[ ! -f "$TARGET_PROFILE/prefs.js" ]] && exit_on_error "Target directory is not a valid Firefox profile."
-    check_firefox_lock
 }
 
 options=(
@@ -120,34 +119,65 @@ run_menu() {
             "[B") ((cursor++)); [ "$cursor" -ge "${#options[@]}" ] && cursor=0 ;;
             " ") [ "$cursor" -lt $((${#options[@]}-2)) ] && { [[ "${selected[$cursor]}" -eq 1 ]] && selected[$cursor]=0 || selected[$cursor]=1; } ;;
             "")
-                [[ "$cursor" -eq $((${#options[@]}-2)) ]] && break
-                [[ "$cursor" -eq $((${#options[@]}-1)) ]] && exit 0
+                [[ "$cursor" -eq $((${#options[@]}-2)) ]] && { apply_changes; break; }
+                [[ "$cursor" -eq $((${#options[@]}-1)) ]] && break
                 ;;
         esac
     done
 }
 
+set_updater() {
+    clear
+    echo -e "${BLUE}${BOLD}--- SET AUTO-UPDATER ---${NC}"
+    local script_path=$(realpath "$0")
+    
+    # Bilgisayar her açıldığında (@reboot) çalışacak şekilde crontab'a ekler
+    (crontab -l 2>/dev/null | grep -v "$script_path"; echo "@reboot /bin/bash $script_path --auto-deploy") | crontab -
+    
+    echo -e "${GREEN}[✔] Success: Updater scheduled at every system startup.${NC}"
+    echo -e "${YELLOW}[!] The script will now run once in the background whenever you boot up.${NC}"
+    read -n 1 -s -p "Press any key to return..."
+}
+
+uninstall_arkenfox() {
+    clear
+    echo -e "${RED}${BOLD}--- UNINSTALL ARKENFOX ---${NC}"
+    echo -e "${YELLOW}[!] Backups will be restored if available.${NC}"
+    echo -ne "${BOLD}Continue? (y/N): ${NC}"
+    read -r un_choice
+    if [[ "$un_choice" =~ ^[Yy]$ ]]; then
+        [ -f "$TARGET_PROFILE/user.js.bak" ] && mv "$TARGET_PROFILE/user.js.bak" "$TARGET_PROFILE/user.js" || rm -f "$TARGET_PROFILE/user.js"
+        [ -f "$TARGET_PROFILE/prefs.js.bak" ] && mv "$TARGET_PROFILE/prefs.js.bak" "$TARGET_PROFILE/prefs.js"
+        # Crontab kaydını da temizle
+        local script_path=$(realpath "$0")
+        crontab -l 2>/dev/null | grep -v "$script_path" | crontab -
+        echo -e "${GREEN}[✔] Arkenfox removed and auto-updater unscheduled.${NC}"
+    fi
+    read -n 1 -s -p "Press any key to return..."
+}
+
 apply_changes() {
+    [[ "$1" != "--silent" ]] && check_firefox_lock
     clear
     echo -e "${BLUE}${BOLD}--- EXECUTION LOGS ---${NC}"
 
-    TMP_USERJS=$(mktemp) || exit_on_error "Environment error: Unable to create temporary objects."
+    TMP_USERJS=$(mktemp) || exit_on_error "Environment error."
 
     if [ -f "$TARGET_PROFILE/user.js" ]; then
-        cp "$TARGET_PROFILE/user.js" "$TARGET_PROFILE/user.js.bak" || exit_on_error "Backup process failed."
+        cp "$TARGET_PROFILE/user.js" "$TARGET_PROFILE/user.js.bak"
         echo -e "${CYAN}[1/4] Status:${NC} Existing user.js archived."
     fi
 
-    echo -ne "${CYAN}[2/4] Fetching:${NC} Downloading Arkenfox master baseline..."
-    curl -sL -o "$TMP_USERJS" https://raw.githubusercontent.com/arkenfox/user.js/master/user.js || exit_on_error "Network error: Connection timed out."
+    echo -ne "${CYAN}[2/4] Fetching:${NC} Downloading Arkenfox baseline..."
+    curl -sL -o "$TMP_USERJS" https://raw.githubusercontent.com/arkenfox/user.js/master/user.js || exit_on_error "Network error."
     echo -e " ${GREEN}SUCCESS${NC}"
 
     echo -ne "${CYAN}[3/4] Injecting:${NC} Applying custom user overrides..."
     {
         echo -e "\n\n/** [UserOverrides] **/"
-        [[ "${selected[0]}" -eq 1 ]] && echo 'user_pref("browser.search.suggest.enabled", true);'
+        [[ "${selected[0]}" -eq 1 ]] || [[ "$1" == "--silent" ]] && echo 'user_pref("browser.search.suggest.enabled", true);'
         [[ "${selected[1]}" -eq 1 ]] && echo 'user_pref("signon.rememberSignons", true);'
-        if [ "${selected[2]}" -eq 1 ]; then
+        if [ "${selected[2]}" -eq 1 ] || [ "$1" == "--silent" ]; then
             echo 'user_pref("browser.startup.homepage", "about:home");'
             echo 'user_pref("browser.newtabpage.enabled", true);'
             echo 'user_pref("browser.startup.page", 1);'
@@ -158,17 +188,59 @@ apply_changes() {
         echo -e "/** [UserOverrides] **/\n"
     } >> "$TMP_USERJS"
 
-    mv "$TMP_USERJS" "$TARGET_PROFILE/user.js" || exit_on_error "Failed bro im sorry"
+    mv "$TMP_USERJS" "$TARGET_PROFILE/user.js" || exit_on_error "Failed to write user.js"
     echo -e " ${GREEN}SUCCESS${NC}"
 
     echo -ne "${CYAN}[4/4] Optimizing:${NC} Synchronizing profile preferences..."
     [ -f "$TARGET_PROFILE/prefs.js" ] && cp "$TARGET_PROFILE/prefs.js" "$TARGET_PROFILE/prefs.js.bak"
     echo -e " ${GREEN}SUCCESS${NC}"
 
-    echo -e "\n${GREEN}${BOLD}[✔] Success. Please restart Firefox to apply changes.${NC}"
+    echo -e "\n${GREEN}${BOLD}[✔] Success. Please restart Firefox.${NC}"
+    [[ "$1" != "--silent" ]] && read -n 1 -s -p "Press any key to return..."
 }
+
+main_panel() {
+    local main_options=("INSTALL / UPDATE" "UNINSTALL" "SET AUTO-UPDATER" "EXIT")
+    local cur=0
+    while true; do
+        clear
+        echo -e "${BLUE}${BOLD}==================================================${NC}"
+        echo -e "${BLUE}${BOLD}            ARKENFOX MANAGEMENT PANEL             ${NC}"
+        echo -e "${BLUE}${BOLD}==================================================${NC}"
+        echo -e "${CYAN}Target Profile:${NC} $TARGET_PROFILE\n"
+
+        for i in "${!main_options[@]}"; do
+            if [[ "$i" -eq "$cur" ]]; then
+                echo -e "${RED}  > ${NC}${BOLD}${CYAN}${main_options[$i]}${NC}"
+            else
+                echo -e "    ${main_options[$i]}"
+            fi
+        done
+
+        IFS= read -rsn1 key
+        [[ $key == $'\x1b' ]] && { read -rsn2 key; }
+        case "$key" in
+            "[A") ((cur--)); [ "$cur" -lt 0 ] && cur=$((${#main_options[@]} - 1)) ;;
+            "[B") ((cur++)); [ "$cur" -ge "${#main_options[@]}" ] && cur=0 ;;
+            "") 
+                case $cur in
+                    0) run_menu ;;
+                    1) uninstall_arkenfox ;;
+                    2) set_updater ;;
+                    3) exit 0 ;;
+                esac
+                ;;
+        esac
+    done
+}
+
+# SESSİZ ÇALIŞMA MODU (CRON İÇİN)
+if [[ "$1" == "--auto-deploy" ]]; then
+    get_profile
+    apply_changes "--silent"
+    exit 0
+fi
 
 check_dependencies
 get_profile
-run_menu
-apply_changes
+main_panel
