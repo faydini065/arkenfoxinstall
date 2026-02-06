@@ -1,23 +1,31 @@
 #!/bin/bash
 
-# --- COLOR DEFINITIONS ---
 BLUE='\033[0;34m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 RED='\033[0;31m'
 CYAN='\033[0;36m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 BOLD='\033[1m'
 
-# --- 1. SMART PROFILE DISCOVERY ---
+# GLOBAL ERROR HANDLER
+exit_on_error() {
+    echo -e "\n${RED}[CRITICAL ERROR] $1${NC}"
+    exit 1
+}
+
+# DEPENDENCY CHECK (Curl is required)
+check_dependencies() {
+    command -v curl >/dev/null 2>&1 || exit_on_error "curl is not installed. Please install it using 'sudo apt install curl'."
+}
+
 get_profile() {
     clear
     echo -e "${BLUE}${BOLD}==================================================${NC}"
-    echo -e "${BLUE}${BOLD}            Arkenfox Installation Script          ${NC}"
+    echo -e "${BLUE}${BOLD}           ARKENFOX GLOBAL CONFIGURATOR           ${NC}"
     echo -e "${BLUE}${BOLD}==================================================${NC}"
-    echo -e "${CYAN}[*] Scanning system for Firefox profiles...${NC}\n"
+    echo -e "${CYAN}[*] Initializing system scan...${NC}\n"
 
-    # Search common paths including Flatpak, Snap, and Native
     SEARCH_PATHS=(
         "$HOME/.var/app/org.mozilla.firefox/config/mozilla/firefox"
         "$HOME/.mozilla/firefox"
@@ -34,50 +42,47 @@ get_profile() {
     done
 
     if [ ${#FOUND_PROFILES[@]} -gt 0 ]; then
-        echo -e "${GREEN}[+] Profiles discovered:${NC}"
+        echo -e "${GREEN}[+] Active profiles detected:${NC}"
         for i in "${!FOUND_PROFILES[@]}"; do
             echo -e "  $((i+1))) ${FOUND_PROFILES[$i]}"
         done
-        echo -e "  m) Enter path manually"
-        echo -ne "\n${BOLD}Select a profile (1-${#FOUND_PROFILES[@]} or m): ${NC}"
+        echo -e "  m) Manual Entry"
+        echo -ne "\n${BOLD}Select Target Profile (1-${#FOUND_PROFILES[@]} or m): ${NC}"
         read -r choice
 
         if [[ "$choice" == "m" ]]; then
-            read -r -p "Enter full path: " TARGET_PROFILE
+            read -r -p "Enter full absolute path: " TARGET_PROFILE
         else
             TARGET_PROFILE="${FOUND_PROFILES[$((choice-1))]}"
         fi
     else
-        echo -e "${YELLOW}[!] No standard profiles found automatically.${NC}"
-        read -r -p "Please paste your profile path manually: " TARGET_PROFILE
+        echo -e "${YELLOW}[!] Automatic detection failed.${NC}"
+        read -r -p "Provide profile path manually: " TARGET_PROFILE
     fi
 
-    # Validation
-    if [ ! -d "$TARGET_PROFILE" ] || [ ! -f "$TARGET_PROFILE/prefs.js" ]; then
-        echo -e "\n${RED}[ERROR] Invalid directory! Profile must contain 'prefs.js'.${NC}"
-        exit 1
-    fi
+    [[ -z "$TARGET_PROFILE" ]] && exit_on_error "Profile path cannot be empty."
+    [[ ! -d "$TARGET_PROFILE" ]] && exit_on_error "Directory does not exist: $TARGET_PROFILE"
+    [[ ! -f "$TARGET_PROFILE/prefs.js" ]] && exit_on_error "Not a valid Firefox profile (prefs.js missing)."
 }
 
-# --- 2. INTERACTIVE MENU (ARROWS & SPACE) ---
 options=(
     "Enable Search Suggestions"
     "Enable Password Manager"
     "Restore Default Homepage (about:home)"
-    "Disable 'Clear on Shutdown' (Keep History)"
-    "Enable WebGL (For Maps/Games)"
-    "Disable Fingerprint"
-    "PROCEED WITH INSTALLATION"
-    "EXIT"
+    "Disable Clear on Shutdown (Keep History)"
+    "Enable WebGL Support"
+    "Disable Fingerprint Resistance (RFP Off)"
+    "EXECUTE DEPLOYMENT"
+    "ABORT"
 )
 selected=(0 0 1 0 0 0)
 cursor=0
 
 draw_menu() {
     clear
-    echo -e "${BLUE}${BOLD}--- CONFIGURATION CUSTOMIZATION ---${NC}"
-    echo -e "${CYAN}Target:${NC} $TARGET_PROFILE"
-    echo -e "${YELLOW}Keys: ↑/↓ Navigate | SPACE Toggle | ENTER Confirm${NC}\n"
+    echo -e "${BLUE}${BOLD}--- SYSTEM CONFIGURATION INTERFACE ---${NC}"
+    echo -e "${CYAN}Target Profile:${NC} $TARGET_PROFILE"
+    echo -e "${YELLOW}Navigation: [↑/↓] | Toggle: [SPACE] | Confirm: [ENTER]${NC}\n"
 
     for i in "${!options[@]}"; do
         if [ "$i" -eq "$cursor" ]; then
@@ -101,7 +106,6 @@ draw_menu() {
 run_menu() {
     while true; do
         draw_menu
-        # Advanced key handling for Space and Arrows
         IFS= read -rsn1 key
         if [[ $key == $'\x1b' ]]; then
             read -rsn2 key
@@ -110,12 +114,12 @@ run_menu() {
         case "$key" in
             "[A") ((cursor--)); [ "$cursor" -lt 0 ] && cursor=$((${#options[@]} - 1)) ;;
             "[B") ((cursor++)); [ "$cursor" -ge "${#options[@]}" ] && cursor=0 ;;
-            " ") # SPACE toggle
+            " ")
                 if [ "$cursor" -lt 6 ]; then
                     [ "${selected[$cursor]}" -eq 1 ] && selected[$cursor]=0 || selected[$cursor]=1
                 fi
                 ;;
-            "") # ENTER
+            "")
                 if [ "$cursor" -eq 6 ]; then break; fi
                 if [ "$cursor" -eq 7 ]; then exit 0; fi
                 ;;
@@ -123,26 +127,28 @@ run_menu() {
     done
 }
 
-# --- 3. EXECUTION & VERIFICATION ---
 apply_changes() {
     clear
-    echo -e "${BLUE}${BOLD}--- DEPLOYMENT LOGS ---${NC}"
+    echo -e "${BLUE}${BOLD}--- DEPLOYMENT LOGS & STATUS ---${NC}"
 
-    # Backup
-    echo -ne "${CYAN}[1/5] Backing up existing user.js...${NC}"
-    [ -f "$TARGET_PROFILE/user.js" ] && cp "$TARGET_PROFILE/user.js" "$TARGET_PROFILE/user.js.bak"
-    echo -e " ${GREEN}DONE${NC}"
+    # 1. Backup Phase
+    echo -ne "${CYAN}[1/5] Phase: Backup | Status: Processing...${NC}"
+    if [ -f "$TARGET_PROFILE/user.js" ]; then
+        cp "$TARGET_PROFILE/user.js" "$TARGET_PROFILE/user.js.bak" || exit_on_error "Backup failed."
+        echo -e "\r${CYAN}[1/5] Phase: Backup | Status: ${GREEN}SUCCESS (user.js.bak)${NC}"
+    else
+        echo -e "\r${CYAN}[1/5] Phase: Backup | Status: ${YELLOW}SKIPPED (No existing user.js)${NC}"
+    fi
 
-    # Download latest Arkenfox
-    echo -ne "${CYAN}[2/5] Downloading latest Arkenfox master...${NC}"
-    curl -sL -o "$TARGET_PROFILE/user.js" https://raw.githubusercontent.com/arkenfox/user.js/master/user.js
-    if [ $? -ne 0 ]; then echo -e " ${RED}FAILED${NC}"; exit 1; fi
-    echo -e " ${GREEN}DONE${NC}"
+    # 2. Download Phase
+    echo -ne "${CYAN}[2/5] Phase: Fetch  | Status: Downloading Master...${NC}"
+    curl -sL -o "$TARGET_PROFILE/user.js" https://raw.githubusercontent.com/arkenfox/user.js/master/user.js || exit_on_error "Download failed."
+    echo -e "\r${CYAN}[2/5] Phase: Fetch  | Status: ${GREEN}SUCCESS (v128+ Baseline)${NC}"
 
-    # Direct Injection
-    echo -ne "${CYAN}[3/5] Injecting custom overrides...${NC}"
+    # 3. Injection Phase
+    echo -ne "${CYAN}[3/5] Phase: Inject | Status: Appending Overrides...${NC}"
     {
-        echo -e "\n\n/** [SIYANWARE-INJECTION-START] **/"
+        echo -e "\n\n/** [GLOBAL-USER-OVERRIDES-START] **/"
         [[ "${selected[0]}" -eq 1 ]] && echo 'user_pref("browser.search.suggest.enabled", true);'
         [[ "${selected[1]}" -eq 1 ]] && echo 'user_pref("signon.rememberSignons", true);'
         if [ "${selected[2]}" -eq 1 ]; then
@@ -153,28 +159,31 @@ apply_changes() {
         [[ "${selected[3]}" -eq 1 ]] && echo 'user_pref("privacy.sanitize.sanitizeOnShutdown", false);'
         [[ "${selected[4]}" -eq 1 ]] && echo 'user_pref("webgl.disabled", false);'
         [[ "${selected[5]}" -eq 1 ]] && echo 'user_pref("privacy.resistFingerprinting", false);'
-        echo -e "/** [SIYANWARE-INJECTION-END] **/\n"
+        echo -e "/** [GLOBAL-USER-OVERRIDES-END] **/\n"
     } >> "$TARGET_PROFILE/user.js"
-    echo -e " ${GREEN}DONE${NC}"
+    echo -e "\r${CYAN}[3/5] Phase: Inject | Status: ${GREEN}SUCCESS (Custom Block Applied)${NC}"
 
-    # Verification
-    echo -ne "${CYAN}[4/5] Verifying integrity...${NC}"
-    if grep -q "SIYANWARE-INJECTION-START" "$TARGET_PROFILE/user.js"; then
-        echo -e " ${GREEN}VERIFIED${NC}"
+    # 4. Verification Phase
+    echo -ne "${CYAN}[4/5] Phase: Verify | Status: Checking Integrity...${NC}"
+    if grep -q "GLOBAL-USER-OVERRIDES-START" "$TARGET_PROFILE/user.js"; then
+        echo -e "\r${CYAN}[4/5] Phase: Verify | Status: ${GREEN}INTEGRITY CONFIRMED${NC}"
     else
-        echo -e " ${RED}WRITE ERROR${NC}"; exit 1
+        exit_on_error "Injection verification failed. File system might be read-only."
     fi
 
-    # Post-Install Clean
-    echo -ne "${CYAN}[5/5] Flushing profile cache (prefs.js)...${NC}"
+    # 5. Optimization Phase
+    echo -ne "${CYAN}[5/5] Phase: Clean  | Status: Flushing prefs.js...${NC}"
     rm -f "$TARGET_PROFILE/prefs.js"
-    echo -e " ${GREEN}DONE${NC}"
+    echo -e "\r${CYAN}[5/5] Phase: Clean  | Status: ${GREEN}SUCCESS (Cache Purged)${NC}"
 
-    echo -e "\n${GREEN}${BOLD}SUCCESS: Arkenfox has been hardened and customized!${NC}"
-    echo -e "${YELLOW}IMPORTANT:${NC} Please restart Firefox completely for changes to take effect."
+    echo -e "\n${GREEN}${BOLD}==================================================${NC}"
+    echo -e "${GREEN}${BOLD}      HARDENING & CUSTOMIZATION COMPLETED         ${NC}"
+    echo -e "${GREEN}${BOLD}==================================================${NC}"
+    echo -e "${YELLOW}Final Instruction:${NC} Please close all Firefox instances and restart."
 }
 
-# --- RUN ---
+# --- START ---
+check_dependencies
 get_profile
 run_menu
 apply_changes
