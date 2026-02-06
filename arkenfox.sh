@@ -161,7 +161,7 @@ apply_changes() {
     if grep -q "GLOBAL-USER-OVERRIDES-START" "$TARGET_PROFILE/user.js"; then
         echo -e "\r${CYAN}[4/5] Phase: Verify | Status: ${GREEN}INTEGRITY CONFIRMED${NC}"
     else
-        exit_on_error "Injection verification failed. File system might be read-only."
+        exit_on_error "Installation verification failed. File system might be read-only."
     fi
 
    
