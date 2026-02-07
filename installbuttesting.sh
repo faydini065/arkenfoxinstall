@@ -159,6 +159,7 @@ execute_deployment() {
         rm -f "$tmp"; return 1
     fi
 
+sed -e 's/\/\* \(ESR[0-9]\{2,\}\.x still uses all.*\)/\/\/ \1/' "$tmp" > "$tmp.tmp" && mv "$tmp.tmp" "$tmp"
     
     [ -f "$profile/user.js" ] && [ ! -f "$profile/user.js.bak" ] && cp "$profile/user.js" "$profile/user.js.bak"
     [ -f "$profile/prefs.js" ] && [ ! -f "$profile/prefs.js.bak" ] && cp "$profile/prefs.js" "$profile/prefs.js.bak"
