@@ -1,5 +1,6 @@
 #!/bin/bash
 
+# --- RENKLER VE AYARLAR ---
 BLUE='\033[0;34m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
@@ -9,9 +10,11 @@ NC='\033[0m'
 BOLD='\033[1m'
 
 CONF_FILE="$HOME/.arkenfox.conf"
+LOG_FILE="$HOME/.arkenfox-deploy.log"
 TARGET_PROFILE=""
 FOUND_PROFILES=()
 
+# --- ÇEKİRDEK FONKSİYONLAR ---
 fatal() {
     echo -e "\n${RED}[FATAL] $1${NC}"
     exit 1
@@ -40,8 +43,11 @@ process_lock_check() {
     local profile="$1"
     local mode="$2"
     if [ -f "$profile/parent.lock" ] || [ -f "$profile/.parentlock" ]; then
-        if [[ "$mode" == "--silent" ]]; then return 1; fi
-        echo -e "${YELLOW}[!] Firefox is active at: $(basename "$profile")${NC}"
+        if [[ "$mode" == "--silent" ]]; then
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] SKIPPED: Firefox active at $(basename "$profile")" >> "$LOG_FILE"
+            return 1
+        fi
+        echo -e "${YELLOW}[!] Firefox is active: $(basename "$profile")${NC}"
         echo -ne "${BOLD}Force execution? (y/N): ${NC}"
         read -r choice
         [[ ! "$choice" =~ ^[Yy]$ ]] && return 1
@@ -58,20 +64,20 @@ resolve_profiles() {
     FOUND_PROFILES=()
     for dir in "${search_dirs[@]}"; do
         if [ -d "$dir" ]; then
-            while read -r prefs_path; do
-                [[ -n "$prefs_path" ]] && FOUND_PROFILES+=("$(dirname "$prefs_path")")
+            while read -r p; do
+                [[ -n "$p" ]] && FOUND_PROFILES+=("$(dirname "$p")")
             done < <(find "$dir" -maxdepth 3 -name "prefs.js" 2>/dev/null)
         fi
     done
 }
 
+# --- ARAYÜZ FONKSİYONLARI ---
 ui_select_profile() {
-    if [ ${#FOUND_PROFILES[@]} -eq 0 ]; then
-        echo -e "${YELLOW}[!] No profiles auto-detected.${NC}"
-        echo -ne "Enter full path: "; read -r TARGET_PROFILE
-    else
+    while true; do
+        resolve_profiles
         local p_opts=("${FOUND_PROFILES[@]}" "Manual Entry" "Exit")
         local cursor=0
+        
         while true; do
             clear
             echo -e "${BLUE}${BOLD}==================================================${NC}"
@@ -88,26 +94,22 @@ ui_select_profile() {
                 "") 
                     if [[ "$cursor" -eq $((${#p_opts[@]} - 1)) ]]; then exit 0;
                     elif [[ "$cursor" -eq $((${#p_opts[@]} - 2)) ]]; then
-                        echo -ne "\nPath: "; read -r TARGET_PROFILE
+                        echo -ne "\nEnter full path (e.g. ~/my-profile): "
+                        read -r TARGET_PROFILE
+                        TARGET_PROFILE="${TARGET_PROFILE/#\~/$HOME}"
+                        if [[ ! -d "$TARGET_PROFILE" || ! -f "$TARGET_PROFILE/prefs.js" ]]; then
+                            echo -e "${RED}[!] Invalid directory or no prefs.js found.${NC}"
+                            sleep 2
+                            break
+                        fi
                     else TARGET_PROFILE="${FOUND_PROFILES[$cursor]}"; fi
-                    break ;;
+                    return 0 ;;
             esac
         done
-    fi
-    [[ ! -f "$TARGET_PROFILE/prefs.js" ]] && fatal "Invalid profile (prefs.js missing)."
+    done
 }
 
-options=(
-    "Enable Search Suggestions"
-    "Enable Password Manager"
-    "Restore Default Homepage"
-    "Keep Browsing History"
-    "Enable WebGL Support"
-    "Disable Fingerprint Resistance"
-    "[✔]CONFIRM"
-    "[x]ABORT"
-)
-
+options=("Search Suggestions" "Password Manager" "Restore Homepage" "History Persistence" "WebGL Support" "Disable RFP" "[✔]CONFIRM" "[x]ABORT")
 selected=()
 core_config_io "load"
 
@@ -116,7 +118,7 @@ ui_render_config() {
     while true; do
         clear
         echo -e "${BLUE}${BOLD}--- CONFIGURATION PANEL ---${NC}"
-        echo -e "${CYAN}Target:${NC} $TARGET_PROFILE\n"
+        echo -e "${CYAN}Target Profile:${NC} $TARGET_PROFILE\n"
         for i in "${!options[@]}"; do
             prefix="    "
             [[ "$i" -eq "$cursor" ]] && prefix="${RED}  > ${NC}${BOLD}${CYAN}"
@@ -138,6 +140,7 @@ ui_render_config() {
     done
 }
 
+# --- DAĞITIM (DEPLOYMENT) ---
 execute_deployment() {
     local profile="$1"
     local mode="$2"
@@ -145,16 +148,22 @@ execute_deployment() {
 
     [[ "$mode" != "--silent" ]] && clear && echo -e "${BLUE}${BOLD}--- DEPLOYMENT: $(basename "$profile") ---${NC}"
     
+    # 1. Lock Check
     if ! process_lock_check "$profile" "$mode"; then
-        rm -f "$tmp"
-        return
+        rm -f "$tmp"; return 1
     fi
 
+    # 2. Network/Curl Check
+    if ! curl -sL -o "$tmp" https://raw.githubusercontent.com/arkenfox/user.js/master/user.js || [ ! -s "$tmp" ]; then
+        [[ "$mode" == "--silent" ]] && echo "[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: Network/File error at $(basename "$profile")" >> "$LOG_FILE"
+        rm -f "$tmp"; return 1
+    fi
+
+    # 3. Backup (Idempotent)
     [ -f "$profile/user.js" ] && [ ! -f "$profile/user.js.bak" ] && cp "$profile/user.js" "$profile/user.js.bak"
     [ -f "$profile/prefs.js" ] && [ ! -f "$profile/prefs.js.bak" ] && cp "$profile/prefs.js" "$profile/prefs.js.bak"
 
-    curl -sL -o "$tmp" https://raw.githubusercontent.com/arkenfox/user.js/master/user.js || { rm -f "$tmp"; echo "Download failed"; return; }
-
+    # 4. Write Overrides
     {
         echo -e "\n/** [UserOverrides] **/"
         [[ "${selected[0]}" -eq 1 ]] && echo 'user_pref("browser.search.suggest.enabled", true);'
@@ -170,32 +179,42 @@ execute_deployment() {
         echo -e "/** [UserOverrides] **/\n"
     } >> "$tmp"
 
-    mv "$tmp" "$profile/user.js"
-    
-    if [[ "$mode" != "--silent" ]]; then
-        echo -e "${GREEN}[✔] Deployment completed for $(basename "$profile")${NC}"
-        read -n 1 -s -p "Press any key..."
+    # 5. Atomic Move (With Check)
+    if mv "$tmp" "$profile/user.js"; then
+        if [[ "$mode" == "--silent" ]]; then
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] SUCCESS: Updated $(basename "$profile")" >> "$LOG_FILE"
+        else
+            echo -e "${GREEN}[✔] Deployment completed successfully.${NC}"
+            read -n 1 -s -p "Press any key..."
+        fi
+    else
+        [[ "$mode" == "--silent" ]] && echo "[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: MV failed at $profile" >> "$LOG_FILE"
+        rm -f "$tmp"; return 1
     fi
 }
 
+# --- OTOMASYON VE YÖNETİM ---
 automation_setup() {
     clear
     local path=$(readlink -f "$0")
-    (crontab -l 2>/dev/null | grep -v "$path"; echo "@reboot /bin/bash \"$path\" --auto-deploy") | crontab -
-    echo -e "${GREEN}[✔] Startup task scheduled.${NC}"
+    if (crontab -l 2>/dev/null | grep -v "$path"; echo "@daily /bin/bash \"$path\" --auto-deploy") | crontab - 2>/dev/null; then
+        echo -e "${GREEN}[✔] Auto-updater set to DAILY via Cron.${NC}"
+    else
+        echo -e "${RED}[!] Failed to set crontab. Check permissions.${NC}"
+    fi
     read -n 1 -s -p "Press any key..."
 }
 
 system_purge() {
     clear
-    echo -ne "${RED}Purge Arkenfox and restore? (y/N): ${NC}"; read -r c
+    echo -ne "${RED}Purge Arkenfox and restore original settings? (y/N): ${NC}"; read -r c
     if [[ "$c" =~ ^[Yy]$ ]]; then
         [ -f "$TARGET_PROFILE/user.js.bak" ] && mv "$TARGET_PROFILE/user.js.bak" "$TARGET_PROFILE/user.js" || rm -f "$TARGET_PROFILE/user.js"
         [ -f "$TARGET_PROFILE/prefs.js.bak" ] && mv "$TARGET_PROFILE/prefs.js.bak" "$TARGET_PROFILE/prefs.js"
         rm -f "$CONF_FILE"
         local path=$(readlink -f "$0")
         crontab -l 2>/dev/null | grep -v "$path" | crontab -
-        echo -e "${GREEN}[✔] System purged.${NC}"
+        echo -e "${GREEN}[✔] System purged and restored.${NC}"
     fi
     read -n 1 -s -p "Press any key..."
 }
@@ -222,14 +241,14 @@ main_interface() {
     done
 }
 
+# --- BAŞLANGIÇ NOKTASI ---
 init_system
-resolve_profiles
-
 if [[ "$1" == "--auto-deploy" ]]; then
+    core_config_io "load"  # 🎯 FIX: Kullanıcı ayarlarını sessiz modda da yükle
+    resolve_profiles
     for profile in "${FOUND_PROFILES[@]}"; do
         execute_deployment "$profile" "--silent"
     done
-    exit 0
 else
     ui_select_profile
     main_interface
