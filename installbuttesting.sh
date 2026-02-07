@@ -244,7 +244,7 @@ main_interface() {
 
 init_system
 if [[ "$1" == "--auto-deploy" ]]; then
-    core_config_io "load"  # 🎯 FIX: Kullanıcı ayarlarını sessiz modda da yükle
+    core_config_io "load" 
     resolve_profiles
     for profile in "${FOUND_PROFILES[@]}"; do
         execute_deployment "$profile" "--silent"
