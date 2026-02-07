@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# --- RENKLER VE AYARLAR ---
+
 BLUE='\033[0;34m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
@@ -14,7 +14,7 @@ LOG_FILE="$HOME/.arkenfox-deploy.log"
 TARGET_PROFILE=""
 FOUND_PROFILES=()
 
-# --- ÇEKİRDEK FONKSİYONLAR ---
+
 fatal() {
     echo -e "\n${RED}[FATAL] $1${NC}"
     exit 1
@@ -71,7 +71,7 @@ resolve_profiles() {
     done
 }
 
-# --- ARAYÜZ FONKSİYONLARI ---
+
 ui_select_profile() {
     while true; do
         resolve_profiles
@@ -140,7 +140,7 @@ ui_render_config() {
     done
 }
 
-# --- DAĞITIM (DEPLOYMENT) ---
+
 execute_deployment() {
     local profile="$1"
     local mode="$2"
@@ -153,17 +153,17 @@ execute_deployment() {
         rm -f "$tmp"; return 1
     fi
 
-    # 2. Network/Curl Check
+    
     if ! curl -sL -o "$tmp" https://raw.githubusercontent.com/arkenfox/user.js/master/user.js || [ ! -s "$tmp" ]; then
         [[ "$mode" == "--silent" ]] && echo "[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: Network/File error at $(basename "$profile")" >> "$LOG_FILE"
         rm -f "$tmp"; return 1
     fi
 
-    # 3. Backup (Idempotent)
+    
     [ -f "$profile/user.js" ] && [ ! -f "$profile/user.js.bak" ] && cp "$profile/user.js" "$profile/user.js.bak"
     [ -f "$profile/prefs.js" ] && [ ! -f "$profile/prefs.js.bak" ] && cp "$profile/prefs.js" "$profile/prefs.js.bak"
 
-    # 4. Write Overrides
+    
     {
         echo -e "\n/** [UserOverrides] **/"
         [[ "${selected[0]}" -eq 1 ]] && echo 'user_pref("browser.search.suggest.enabled", true);'
@@ -193,7 +193,7 @@ execute_deployment() {
     fi
 }
 
-# --- OTOMASYON VE YÖNETİM ---
+
 automation_setup() {
     clear
     local path=$(readlink -f "$0")
@@ -241,7 +241,7 @@ main_interface() {
     done
 }
 
-# --- BAŞLANGIÇ NOKTASI ---
+
 init_system
 if [[ "$1" == "--auto-deploy" ]]; then
     core_config_io "load"  # 🎯 FIX: Kullanıcı ayarlarını sessiz modda da yükle
