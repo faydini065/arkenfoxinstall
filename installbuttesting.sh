@@ -58,7 +58,6 @@ resolve_profiles() {
     FOUND_PROFILES=()
     for dir in "${search_dirs[@]}"; do
         if [ -d "$dir" ]; then
-            # prefs.js olan dizinleri bul (en garanti profil tespit yöntemi)
             while read -r prefs_path; do
                 [[ -n "$prefs_path" ]] && FOUND_PROFILES+=("$(dirname "$prefs_path")")
             done < <(find "$dir" -maxdepth 3 -name "prefs.js" 2>/dev/null)
@@ -146,17 +145,14 @@ execute_deployment() {
 
     [[ "$mode" != "--silent" ]] && clear && echo -e "${BLUE}${BOLD}--- DEPLOYMENT: $(basename "$profile") ---${NC}"
     
-    # Kilit kontrolü (Hata durumunda tmp dosyasını sil ve çık)
     if ! process_lock_check "$profile" "$mode"; then
         rm -f "$tmp"
         return
     fi
 
-    # Yedekleme (Sadece yedek yoksa)
     [ -f "$profile/user.js" ] && [ ! -f "$profile/user.js.bak" ] && cp "$profile/user.js" "$profile/user.js.bak"
     [ -f "$profile/prefs.js" ] && [ ! -f "$profile/prefs.js.bak" ] && cp "$profile/prefs.js" "$profile/prefs.js.bak"
 
-    # İndirme
     curl -sL -o "$tmp" https://raw.githubusercontent.com/arkenfox/user.js/master/user.js || { rm -f "$tmp"; echo "Download failed"; return; }
 
     {
@@ -226,12 +222,10 @@ main_interface() {
     done
 }
 
-# --- ÇALIŞTIRMA AKIŞI ---
 init_system
 resolve_profiles
 
 if [[ "$1" == "--auto-deploy" ]]; then
-    # Sessiz modda tüm profilleri tara ve güncelle
     for profile in "${FOUND_PROFILES[@]}"; do
         execute_deployment "$profile" "--silent"
     done
