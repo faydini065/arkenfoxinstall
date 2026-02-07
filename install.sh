@@ -8,7 +8,6 @@ CYAN='\033[0;36m'
 NC='\033[0m'
 BOLD='\033[1m'
 
-# --- 1. YARDIMCI FONKSİYONLAR ---
 exit_on_error() {
     echo -e "\n${RED}[ERROR] $1${NC}"
     exit 1
@@ -78,7 +77,7 @@ get_profile() {
     [[ ! -f "$TARGET_PROFILE/prefs.js" ]] && exit_on_error "Invalid Firefox profile."
 }
 
-# --- 2. AYARLAR VE MENÜ ---
+
 options=(
     "Enable Search Suggestions"
     "Enable Password Manager"
@@ -131,7 +130,7 @@ run_menu() {
     done
 }
 
-# --- 3. ANA İŞLEMLER ---
+
 apply_changes() {
     local mode=$1
     [[ "$mode" != "--silent" ]] && clear && echo -e "${BLUE}${BOLD}--- EXECUTION LOGS ---${NC}"
@@ -217,7 +216,6 @@ main_panel() {
     done
 }
 
-# --- 4. ÇALIŞTIRMA MANTIĞI ---
 check_dependencies
 
 if [[ "$1" == "--auto-deploy" ]]; then
